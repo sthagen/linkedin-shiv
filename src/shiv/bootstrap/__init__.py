@@ -1,14 +1,43 @@
+import compileall
+import os
+import runpy
 import site
 import sys
 import shutil
+import zipfile
 
+from contextlib import suppress
+from functools import partial
 from importlib import import_module
 from pathlib import Path
-from py_compile import compile
 
+from .filelock import FileLock
 from .environment import Environment
 from .interpreter import execute_interpreter
-from .utils import current_zipfile, silence_stderr
+
+
+def run(module):  # pragma: no cover
+    """Run a module in a scrubbed environment.
+
+    If a single pyz has multiple callers, we want to remove these vars as we no longer need them
+    and they can cause subprocesses to fail with a ModuleNotFoundError.
+
+    :param callable module: The entry point to invoke the pyz with.
+    """
+    with suppress(KeyError):
+        del os.environ[Environment.MODULE]
+
+    with suppress(KeyError):
+        del os.environ[Environment.ENTRY_POINT]
+
+    sys.exit(module())
+
+
+def current_zipfile():
+    """A function to vend the current zipfile, if any"""
+    if zipfile.is_zipfile(sys.argv[0]):
+        fd = open(sys.argv[0], "rb")
+        return zipfile.ZipFile(fd)
 
 
 def import_string(import_name):
@@ -53,32 +82,63 @@ def cache_path(archive, root_dir, build_id):
     :param str buidl_id: The build id generated at zip creation.
     """
     root = root_dir or Path("~/.shiv").expanduser()
-    name = Path(archive.filename).stem
+    name = Path(archive.filename).resolve().stem
     return root / f"{name}_{build_id}"
 
 
-def extract_site_packages(archive, target_path):
+def extract_site_packages(archive, target_path, compile_pyc, compile_workers=0, force=False):
     """Extract everything in site-packages to a specified path.
 
     :param ZipFile archive: The zipfile object we are bootstrapping from.
     :param Path target_path: The path to extract our zip to.
     """
-    target_path_tmp = Path(target_path.parent, target_path.stem + ".tmp")
+    parent = target_path.parent
+    target_path_tmp = Path(parent, target_path.stem + ".tmp")
+    lock = Path(parent, target_path.stem + ".lock")
 
-    for filename in archive.namelist():
-        if filename.startswith("site-packages"):
-            archive.extract(filename, target_path_tmp)
+    # If this is the first time that a pyz is being extracted, we'll need to create the ~/.shiv dir
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
 
-    # compile pyc with stderr silenced
-    with silence_stderr():
-        for py_file in target_path_tmp.glob('**/*.py'):
-            compile(py_file)
+    with FileLock(lock):
 
-    # atomic move
-    shutil.move(target_path_tmp.as_posix(), target_path.as_posix())
+        # we acquired a lock, it's possible that prior invocation was holding the lock and has
+        # completed bootstrapping, so let's check (again) if we need to do any work
+        if not target_path.exists() or force:
+
+            # extract our site-packages
+            for fileinfo in archive.infolist():
+
+                if fileinfo.filename.startswith("site-packages"):
+                    extracted = archive.extract(fileinfo.filename, target_path_tmp)
+
+                    # restore original permissions
+                    os.chmod(extracted, fileinfo.external_attr >> 16)
+
+            if compile_pyc:
+                compileall.compile_dir(target_path_tmp, quiet=2, workers=compile_workers)
+
+            # if using `force` we will need to delete our target path
+            if target_path.exists():
+                shutil.rmtree(str(target_path))
+
+            # atomic move
+            shutil.move(str(target_path_tmp), str(target_path))
 
 
-def bootstrap():
+def _first_sitedir_index():
+    for index, part in enumerate(sys.path):
+        if Path(part).stem in ("site-packages", "dist-packages"):
+            return index
+
+
+def _extend_python_path(environ, additional_paths):
+    python_path = environ["PYTHONPATH"].split(os.pathsep) if "PYTHONPATH" in environ else []
+    python_path.extend(additional_paths)
+    environ["PYTHONPATH"] = os.pathsep.join(python_path)
+
+
+def bootstrap():  # pragma: no cover
     """Actually bootstrap our shiv environment."""
 
     # get a handle of the currently executing zip file
@@ -92,24 +152,37 @@ def bootstrap():
 
     # determine if first run or forcing extract
     if not site_packages.exists() or env.force_extract:
-        extract_site_packages(archive, site_packages.parent)
+        extract_site_packages(archive, site_packages.parent, env.compile_pyc, env.compile_workers, env.force_extract)
 
-    # stdlib blessed way of extending path
+    # get sys.path's length
+    length = len(sys.path)
+
+    # Find the first instance of an existing site-packages on sys.path
+    index = _first_sitedir_index() or length
+
+    # append site-packages using the stdlib blessed way of extending path
+    # so as to handle .pth files correctly
     site.addsitedir(site_packages)
 
-    # do entry point import and call
-    if env.entry_point is not None and env.interpreter is None:
-        mod = import_string(env.entry_point)
-        try:
-            mod()
-        except TypeError as e:
-            # catch "<module> is not callable", which is thrown when the entry point's
-            # callable shares a name with it's parent module
-            # e.g. "from foo.bar import bar; bar()"
-            getattr(mod, env.entry_point.replace(":", ".").split(".")[1])()
-    else:
-        # drop into interactive mode
-        execute_interpreter()
+    # add our site-packages to the environment, if requested
+    if env.extend_pythonpath:
+        _extend_python_path(os.environ, sys.path[index:])
+
+    # reorder to place our site-packages before any others found
+    sys.path = sys.path[:index] + sys.path[length:] + sys.path[index:length]
+
+    # first check if we should drop into interactive mode
+    if not env.interpreter:
+
+        # do entry point import and call
+        if env.entry_point is not None:
+            run(import_string(env.entry_point))
+
+        elif env.script is not None:
+            run(partial(runpy.run_path, site_packages / "bin" / env.script, run_name="__main__"))
+
+    # all other options exhausted, drop into interactive mode
+    execute_interpreter()
 
 
 if __name__ == "__main__":

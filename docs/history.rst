@@ -35,16 +35,18 @@ injecting said dependencies at runtime. We have to credit the great work by @wic
 
 The primary differences between PEX and shiv are:
 
-* ``shiv`` completey avoids the use of ``pkg_resources``. If it is included by a transitive
-  dependency, the performance implications are mitigated by limiting the length of ``sys.path`` and
-  always including the `-s <https://docs.python.org/3/using/cmdline.html#cmdoption-s>`_ and
-  `-E <https://docs.python.org/3/using/cmdline.html#cmdoption-e>`_ Python interpreter flags.
+* ``shiv`` completely avoids the use of ``pkg_resources``. If it is included by a transitive
+  dependency, the performance implications are mitigated by limiting the length of ``sys.path``.
+  Internally, at LinkedIn, we always include the
+  `-s <https://docs.python.org/3/using/cmdline.html#cmdoption-s>`_ and
+  `-E <https://docs.python.org/3/using/cmdline.html#cmdoption-e>`_ Python interpreter flags by
+  specifying ``--python "/path/to/python -sE"``, which ensures a clean environment.
 * Instead of shipping our binary with downloaded wheels inside, we package an entire site-packages
   directory, as installed by ``pip``. We then bootstrap that directory post-extraction via the
   stdlib's ``site.addsitedir`` function. That way, everything works out of the box: namespace
   packages, real filesystem access, etc.
 
 Because we optimize for a shorter ``sys.path`` and don't include ``pkg_resources`` in the critical
-path, executales created with ``shiv`` can outperform ones created with PEX by almost 2x. In most
+path, executables created with ``shiv`` can outperform ones created with PEX by almost 2x. In most
 cases the executables created with ``shiv`` are even faster than running a script from within a
 virtualenv!

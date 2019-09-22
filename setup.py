@@ -12,12 +12,6 @@ import venv
 from pathlib import Path
 from setuptools.command import easy_install
 
-requirements = [
-    'click==6.7',
-    'pip>=9.0.1',
-    'importlib_resources>=0.4',
-]
-
 # The following template and classmethod are copied from
 # fast entry points, Copyright (c) 2016, Aaron Christianson
 # https://github.com/ninjaaron/fast-entry_point
@@ -95,24 +89,5 @@ class Venv(setuptools.Command):
 
 
 setuptools.setup(
-    name='shiv',
-    version='0.0.14',
-    description="A command line utility for building fully self contained Python zipapps.",
-    packages=setuptools.find_packages('src'),
-    package_dir={'': 'src'},
-    install_requires=requirements,
-    entry_points={
-        'console_scripts': [
-            'shiv = shiv.cli:main',
-        ],
-    },
-    include_package_data=True,
     cmdclass={'venv': Venv},
-    license='BSD License',
-    classifiers=[
-        'License :: OSI Approved :: BSD License',
-        'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-    ],
 )

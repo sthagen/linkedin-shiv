@@ -5,6 +5,9 @@ import sys
 
 from typing import Generator, List
 
+import click
+
+from .bootstrap import _first_sitedir_index, _extend_python_path
 from .constants import PIP_REQUIRE_VIRTUALENV, PIP_INSTALL_ERROR
 
 
@@ -25,14 +28,14 @@ def clean_pip_env() -> Generator[None, None, None]:
             os.environ[PIP_REQUIRE_VIRTUALENV] = require_venv
 
 
-def install(interpreter_path: str, args: List[str]) -> None:
+def install(args: List[str]) -> None:
     """`pip install` as a function.
 
     Accepts a list of pip arguments.
 
     .. code-block:: py
 
-        >>> install('/usr/local/bin/python3', ['numpy', '--target', 'site-packages'])
+        >>> install(['numpy', '--target', 'site-packages'])
         Collecting numpy
         Downloading numpy-1.13.3-cp35-cp35m-manylinux1_x86_64.whl (16.9MB)
             100% || 16.9MB 53kB/s
@@ -40,17 +43,26 @@ def install(interpreter_path: str, args: List[str]) -> None:
         Successfully installed numpy-1.13.3
 
     """
+
     with clean_pip_env():
 
+        # if being invoked as a pyz, we must ensure we have access to our own
+        # site-packages when subprocessing since there is no guarantee that pip
+        # will be available
+        subprocess_env = os.environ.copy()
+        sitedir_index = _first_sitedir_index()
+        _extend_python_path(subprocess_env, sys.path[sitedir_index:])
+
         process = subprocess.Popen(
-            [interpreter_path, "-m", "pip", "install"] + args,
+            [sys.executable, "-m", "pip", "--disable-pip-version-check", "install", *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=subprocess_env,
         )
 
-        for output in process.stdout:
-            if output:
-                print(output.decode().rstrip())
+    for output in process.stdout:
+        if output:
+            click.echo(output.decode().rstrip())
 
-        if process.wait() > 0:
-            sys.exit(PIP_INSTALL_ERROR)
+    if process.wait() > 0:
+        sys.exit(PIP_INSTALL_ERROR)
