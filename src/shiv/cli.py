@@ -2,32 +2,24 @@ import shutil
 import sys
 import uuid
 
+from configparser import ConfigParser
+from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import List, Optional, no_type_check
+
+import click
+
+from . import bootstrap, builder, pip
+from .bootstrap.environment import Environment
+from .constants import DISALLOWED_ARGS, DISALLOWED_PIP_ARGS, NO_ENTRY_POINT, NO_OUTFILE, NO_PIP_ARGS_OR_SITE_PACKAGES
+
 try:
     import importlib.resources as importlib_resources  # type: ignore
 except ImportError:
     import importlib_resources  # type: ignore
 
-from configparser import ConfigParser
-from datetime import datetime
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Optional, List, no_type_check
-
-import click
-
-from . import pip
-from . import builder
-from . import bootstrap
-from .bootstrap.environment import Environment
-from .constants import (
-    DISALLOWED_ARGS,
-    DISALLOWED_PIP_ARGS,
-    NO_PIP_ARGS_OR_SITE_PACKAGES,
-    NO_OUTFILE,
-    NO_ENTRY_POINT,
-)
-
-__version__ = "0.0.49"
+__version__ = "0.0.50"
 
 
 def find_entry_point(site_packages: Path, console_script: str) -> str:
@@ -94,16 +86,10 @@ def _interpreter_path(append_version: bool = False) -> str:
         return sys.executable
 
 
-@click.command(
-    context_settings=dict(
-        help_option_names=["-h", "--help", "--halp"], ignore_unknown_options=True
-    )
-)
+@click.command(context_settings=dict(help_option_names=["-h", "--help", "--halp"], ignore_unknown_options=True))
 @click.version_option(version=__version__, prog_name="shiv")
 @click.option("--entry-point", "-e", default=None, help="The entry point to invoke.")
-@click.option(
-    "--console-script", "-c", default=None, help="The console_script to invoke."
-)
+@click.option("--console-script", "-c", default=None, help="The console_script to invoke.")
 @click.option("--output-file", "-o", help="The file for shiv to create.")
 @click.option("--python", "-p", help="The path to a python interpreter to use.")
 @click.option(
@@ -111,20 +97,18 @@ def _interpreter_path(append_version: bool = False) -> str:
     help="The path to an existing site-packages directory to copy into the zipapp",
     type=click.Path(exists=True),
 )
-@click.option(
-    "--compressed/--uncompressed",
-    default=True,
-    help="Whether or not to compress your zip.",
-)
+@click.option("--compressed/--uncompressed", default=True, help="Whether or not to compress your zip.")
 @click.option(
     "--compile-pyc/--no-compile-pyc",
     default=False,
     help="Whether or not to compile pyc files during initial bootstrap.",
 )
 @click.option(
-    "--extend-pythonpath/--no-extend-pythonpath", "-E",
+    "--extend-pythonpath/--no-extend-pythonpath",
+    "-E",
     default=False,
-    help="Add the contents of the zipapp to PYTHONPATH (for subprocesses).")
+    help="Add the contents of the zipapp to PYTHONPATH (for subprocesses).",
+)
 @click.argument("pip_args", nargs=-1, type=click.UNPROCESSED)
 def main(
     output_file: str,
@@ -152,11 +136,7 @@ def main(
     for disallowed in DISALLOWED_ARGS:
         for supplied_arg in pip_args:
             if supplied_arg in disallowed:
-                sys.exit(
-                    DISALLOWED_PIP_ARGS.format(
-                        arg=supplied_arg, reason=DISALLOWED_ARGS[disallowed]
-                    )
-                )
+                sys.exit(DISALLOWED_PIP_ARGS.format(arg=supplied_arg, reason=DISALLOWED_ARGS[disallowed]))
 
     with TemporaryDirectory() as working_path:
         tmp_site_packages = Path(working_path, "site-packages")

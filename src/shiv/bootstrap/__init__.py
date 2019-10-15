@@ -1,9 +1,9 @@
 import compileall
 import os
 import runpy
+import shutil
 import site
 import sys
-import shutil
 import zipfile
 
 from contextlib import suppress
@@ -11,8 +11,8 @@ from functools import partial
 from importlib import import_module
 from pathlib import Path
 
-from .filelock import FileLock
 from .environment import Environment
+from .filelock import FileLock
 from .interpreter import execute_interpreter
 
 

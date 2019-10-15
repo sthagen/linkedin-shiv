@@ -6,13 +6,13 @@ https://docs.python.org/3.7/library/zipapp.html#cmdoption-zipapp-c
 
 """
 import contextlib
-import zipfile
 import stat
 import sys
 import zipapp
+import zipfile
 
 from pathlib import Path
-from typing import Any, IO, Generator, Union
+from typing import IO, Any, Generator, Union
 
 from .constants import BINPRM_ERROR
 
@@ -50,13 +50,7 @@ def maybe_open(archive: Union[str, Path], mode: str) -> Generator[IO[Any], None,
         yield archive
 
 
-def create_archive(
-    source: Path,
-    target: Path,
-    interpreter: str,
-    main: str,
-    compressed: bool = True
-) -> None:
+def create_archive(source: Path, target: Path, interpreter: str, main: str, compressed: bool = True) -> None:
     """Create an application archive from SOURCE.
 
     A slightly modified version of stdlib's
@@ -84,7 +78,7 @@ def create_archive(
             for child in source.rglob("*"):
 
                 # skip compiled files
-                if child.suffix == '.pyc':
+                if child.suffix == ".pyc":
                     continue
 
                 arcname = child.relative_to(source)

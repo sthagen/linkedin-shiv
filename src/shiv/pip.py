@@ -7,8 +7,8 @@ from typing import Generator, List
 
 import click
 
-from .bootstrap import _first_sitedir_index, _extend_python_path
-from .constants import PIP_REQUIRE_VIRTUALENV, PIP_INSTALL_ERROR
+from .bootstrap import _extend_python_path, _first_sitedir_index
+from .constants import PIP_INSTALL_ERROR, PIP_REQUIRE_VIRTUALENV
 
 
 @contextlib.contextmanager
@@ -58,11 +58,12 @@ def install(args: List[str]) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=subprocess_env,
+            universal_newlines=True,
         )
 
     for output in process.stdout:
         if output:
-            click.echo(output.decode().rstrip())
+            click.echo(output.rstrip())
 
     if process.wait() > 0:
         sys.exit(PIP_INSTALL_ERROR)
