@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import json
 import os
 import stat
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from click.testing import CliRunner
-from shiv.cli import _interpreter_path, find_entry_point, main
+from shiv.cli import _interpreter_path, console_script_exists, find_entry_point, main
 from shiv.constants import DISALLOWED_ARGS, DISALLOWED_PIP_ARGS, NO_OUTFILE, NO_PIP_ARGS_OR_SITE_PACKAGES
 from shiv.info import main as info_main
 from shiv.pip import install
@@ -41,8 +42,10 @@ class TestCLI:
     @pytest.fixture
     def runner(self):
         """Returns a click test runner."""
+        def invoke(args, env=None):
+            return CliRunner().invoke(main, args, env=env)
 
-        return lambda args: CliRunner().invoke(main, args)
+        return invoke
 
     @pytest.fixture
     def info_runner(self):
@@ -53,7 +56,21 @@ class TestCLI:
     def test_find_entry_point(self, tmpdir, package_location):
         """Test that we can find console_script metadata."""
         install(["-t", str(tmpdir), str(package_location)])
-        assert find_entry_point(Path(tmpdir), "hello") == "hello:main"
+        assert find_entry_point([Path(tmpdir)], "hello") == "hello:main"
+
+    def test_find_entry_point_two_points(self, tmpdir, package_location):
+        """Test that we can find console_script metadata."""
+        install(["-t", str(tmpdir), str(package_location)])
+        assert find_entry_point([Path(tmpdir)], "hello") == "hello:main"
+
+    def test_console_script_exists(self, tmpdir, package_location):
+        """Test that we can check console_script presence."""
+        install_dir = os.path.join(tmpdir, 'install')
+        install(["-t", str(install_dir), str(package_location)])
+        empty_dir = os.path.join(tmpdir, 'empty')
+        os.makedirs(empty_dir)
+
+        assert console_script_exists([Path(empty_dir), Path(install_dir)], "hello")
 
     def test_no_args(self, runner):
         """This should fail with a warning about supplying pip arguments"""
@@ -166,6 +183,37 @@ class TestCLI:
         pythonpath_has_root = str(shiv_root) in proc.stdout.decode()
         assert extend_path.startswith("--no") != pythonpath_has_root
 
+    def test_multiple_site_packages(self, shiv_root, runner):
+        output_file = Path(shiv_root, "test_multiple_sp.pyz")
+        package_dir = Path(shiv_root, "package")
+        main_script = Path(package_dir, "hello.py")
+
+        env_code = "\n".join(["import os", "def hello():", "    print('hello!')"])
+
+        package_dir.mkdir()
+        main_script.write_text(env_code)
+
+        other_package_dir = Path(shiv_root, "dependent_package")
+        main_script = Path(package_dir, "hello_client.py")
+
+        env_client_code = "\n".join(["import os", "from hello import hello", "def main():", "    hello()"])
+
+        other_package_dir.mkdir()
+        main_script.write_text(env_client_code)
+
+        result = runner(["-e", "hello_client:main", "-o", str(output_file), "--site-packages", str(package_dir),
+                         "--site-packages", str(other_package_dir)])
+
+        # check that the command successfully completed
+        assert result.exit_code == 0
+
+        # ensure the created file actually exists
+        assert output_file.exists()
+
+        # now run the produced zipapp and confirm that output is ok
+        proc = subprocess.run([str(output_file)], stdout=subprocess.PIPE, shell=True, env=os.environ)
+        assert 'hello!' in proc.stdout.decode()
+
     def test_no_entrypoint(self, shiv_root, runner, package_location, monkeypatch):
 
         output_file = Path(shiv_root, "test.pyz")
@@ -190,3 +238,39 @@ class TestCLI:
 
         assert proc.returncode == 0
         assert "hello" in proc.stdout.decode()
+
+    def test_results_are_binary_identical_with_env_and_build_id(self, shiv_root, runner, package_location):
+        first_output_file = Path(shiv_root, "test_one.pyz")
+        second_output_file = Path(shiv_root, "test_two.pyz")
+
+        result_one = runner(["-e", "hello:main", "-o", str(first_output_file), "--reproducible",
+                             str(package_location)],
+                            env={'SOURCE_DATE_EPOCH': '1234567890'})  # 2009-02-13 23:31:30 UTC
+
+        result_two = runner(["-e", "hello:main", "-o", str(second_output_file), "--reproducible",
+                             str(package_location)],
+                            env={'SOURCE_DATE_EPOCH': '1234567890'})  # 2009-02-13 23:31:30 UTC
+
+        # check that both commands successfully completed
+        assert result_one.exit_code == 0
+        assert result_two.exit_code == 0
+
+        # check that both executables are binary identical
+        with first_output_file.open('rb') as f:
+            first_hash = hashlib.md5(f.read()).hexdigest()
+        with second_output_file.open('rb') as f:
+            second_hash = hashlib.md5(f.read()).hexdigest()
+
+        assert first_hash == second_hash
+
+        # finally, check that one of the result works
+        proc = subprocess.run(
+            [str(first_output_file)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            env=os.environ,
+        )
+
+        assert proc.returncode == 0
+        assert 'hello' in proc.stdout.decode()
