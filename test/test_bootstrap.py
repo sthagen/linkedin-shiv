@@ -2,7 +2,6 @@ import os
 import sys
 
 from code import interact
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from site import addsitedir
@@ -13,22 +12,17 @@ from zipfile import ZipFile
 import pytest
 
 from shiv.bootstrap import (
-    _extend_python_path,
-    _first_sitedir_index,
     cache_path,
     current_zipfile,
+    ensure_no_modify,
+    extend_python_path,
     extract_site_packages,
+    get_first_sitedir_index,
     import_string,
 )
 from shiv.bootstrap.environment import Environment
 from shiv.bootstrap.filelock import FileLock
-
-
-@contextmanager
-def env_var(key, value):
-    os.environ[key] = value
-    yield
-    del os.environ[key]
+from shiv.pip import install
 
 
 class TestBootstrap:
@@ -55,36 +49,41 @@ class TestBootstrap:
 
     def test_is_zipfile(self, zip_location):
         with mock.patch.object(sys, "argv", [zip_location]):
-            assert isinstance(current_zipfile(), ZipFile)
+            with current_zipfile() as zipfile:
+                assert isinstance(zipfile, ZipFile)
 
     # When the tests are run via tox, sys.argv[0] is the full path to 'pytest.EXE',
     # i.e. a native launcher created by pip to from console_scripts entry points.
     # These are indeed a form of zip files, thus the following assertion could fail.
     @pytest.mark.skipif(os.name == "nt", reason="this may give false positive on win")
     def test_argv0_is_not_zipfile(self):
-        assert not current_zipfile()
+        with current_zipfile() as zipfile:
+            assert not zipfile
 
-    def test_cache_path(self):
+    def test_cache_path(self, env_var):
         mock_zip = mock.MagicMock(spec=ZipFile)
         mock_zip.filename = "test"
         uuid = str(uuid4())
 
-        assert cache_path(mock_zip, Path.cwd(), uuid) == Path.cwd() / f"test_{uuid}"
+        assert cache_path(mock_zip, 'foo', uuid) == Path("foo", f"test_{uuid}")
+
+        with env_var("FOO", "foo"):
+            assert cache_path(mock_zip, '$FOO', uuid) == Path("foo", f"test_{uuid}")
 
     def test_first_sitedir_index(self):
         with mock.patch.object(sys, "path", ["site-packages", "dir", "dir", "dir"]):
-            assert _first_sitedir_index() == 0
+            assert get_first_sitedir_index() == 0
 
         with mock.patch.object(sys, "path", []):
-            assert _first_sitedir_index() is None
+            assert get_first_sitedir_index() is None
 
     @pytest.mark.parametrize("nested", (False, True))
     @pytest.mark.parametrize("compile_pyc", (False, True))
     @pytest.mark.parametrize("force", (False, True))
-    def test_extract_site_packages(self, tmpdir, zip_location, nested, compile_pyc, force):
+    def test_extract_site_packages(self, tmp_path, zip_location, nested, compile_pyc, force):
 
         zipfile = ZipFile(str(zip_location))
-        target = Path(tmpdir, "test")
+        target = tmp_path / "test"
 
         if nested:
             # we want to test for not-yet-created shiv root dirs
@@ -106,14 +105,21 @@ class TestBootstrap:
     @pytest.mark.parametrize("additional_paths", (["test"], ["test", ".pth"]))
     def test_extend_path(self, additional_paths):
 
-        env = os.environ.copy()
+        env = {}
 
-        _extend_python_path(env, additional_paths)
+        extend_python_path(env, additional_paths)
         assert env["PYTHONPATH"] == os.pathsep.join(additional_paths)
+
+    def test_extend_path_existing_pythonpath(self):
+        """When PYTHONPATH exists, extending it preserves the existing values."""
+        env = {"PYTHONPATH": "hello"}
+
+        extend_python_path(env, ["test", ".pth"])
+        assert env["PYTHONPATH"] == os.pathsep.join(["hello", "test", ".pth"])
 
 
 class TestEnvironment:
-    def test_overrides(self):
+    def test_overrides(self, env_var):
         now = str(datetime.now())
         version = "0.0.1"
         env = Environment(now, version)
@@ -131,7 +137,7 @@ class TestEnvironment:
 
         assert env.root is None
         with env_var("SHIV_ROOT", "tmp"):
-            assert env.root == Path("tmp")
+            assert env.root == "tmp"
 
         assert env.force_extract is False
         with env_var("SHIV_FORCE_EXTRACT", "1"):
@@ -161,8 +167,26 @@ class TestEnvironment:
         env_from_json = Environment.from_json(env_as_json)
         assert env.__dict__ == env_from_json.__dict__
 
-    def test_lock(self):
-        with FileLock("lockfile") as f:
+    def test_lock(self, tmp_path):
+        with FileLock(str(tmp_path / "lockfile")) as f:
             assert f.is_locked
 
         assert not f.is_locked
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="windows creates .exe files for entry points, which are not reproducible :("
+    )
+    def test_ensure_no_modify(self, tmp_path, package_location):
+
+        # Populate a site-packages dir
+        site_packages = tmp_path / "site-packages"
+        install(["-t", str(site_packages), str(package_location)])
+
+        for test_hash in [{"abc": "123"}, {"hello/__init__.py": "123"}]:
+            with pytest.raises(RuntimeError):
+                ensure_no_modify(site_packages, test_hash)
+
+        # the hash of the only source file the test package provides
+        hashes = {"hello/__init__.py": "1e8d5b8a6839487a4211229f69b76a5f901515dcad7f111a4bdd5b30d9e96020"}
+
+        ensure_no_modify(site_packages, hashes)

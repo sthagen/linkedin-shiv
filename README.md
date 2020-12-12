@@ -1,9 +1,9 @@
-[![PyPI](https://img.shields.io/pypi/v/shiv.svg)](https://pypi.python.org/pypi/shiv)
-[![Build Status](https://dev.azure.com/lcarvalh/shiv/_apis/build/status/linkedin.shiv?branchName=master)](https://dev.azure.com/lcarvalh/shiv/_build/latest?definitionId=1&branchName=master)
-[![Coverage Status](https://coveralls.io/repos/github/linkedin/shiv/badge.svg)](https://coveralls.io/github/linkedin/shiv)
-[![Documentation Status](https://readthedocs.org/projects/shiv/badge/?version=latest)](http://shiv.readthedocs.io/en/latest/?badge=latest)
-[![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
-[![Supported](https://img.shields.io/pypi/pyversions/shiv.svg)](https://pypi.python.org/pypi/shiv)
+[![pypi](https://img.shields.io/pypi/v/shiv.svg)](https://pypi.python.org/pypi/shiv)
+[![ci](https://github.com/linkedin/shiv/workflows/ci/badge.svg)](https://github.com/linkedin/shiv/actions?query=workflow%3Aci)
+[![codecov](https://codecov.io/gh/linkedin/shiv/branch/master/graph/badge.svg)](https://codecov.io/gh/linkedin/shiv)
+[![docs](https://readthedocs.org/projects/shiv/badge/?version=latest)](http://shiv.readthedocs.io/en/latest/?badge=latest)
+[![license](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
+[![supported](https://img.shields.io/pypi/pyversions/shiv.svg)](https://pypi.python.org/pypi/shiv)
 
 ![snake](https://github.com/linkedin/shiv/raw/master/logo.png)
 
@@ -12,14 +12,14 @@ shiv is a command line utility for building fully self-contained Python zipapps 
 
 shiv's primary goal is making distributing Python applications fast & easy.
 
-Full documentation can be found [here](http://shiv.readthedocs.io/en/latest/).
+📗 Full documentation can be found [here](http://shiv.readthedocs.io/en/latest/).
 
 ### sys requirements
 
 - python3.6+
 - linux/osx/windows
 
-### how to
+### quickstart
 
 shiv has a few command line options of its own and accepts almost all options passable to `pip install`.
 
@@ -74,22 +74,22 @@ We'd love contributions! Getting bootstrapped to develop is easy:
 ```sh
 git clone git@github.com:linkedin/shiv.git
 cd shiv
-python3 setup.py venv
-. activate
+python3 -m venv venv
+source ./venv/bin/activate
 python3 setup.py develop
 ```
 
 Don't forget to run and write tests:
 
 ```sh
-pip install tox
+python3 -m pip install tox
 tox
 ```
 
 To build documentation when you changed something in `docs`:
 
 ```sh
-pip install -r docs/requirements.txt
+python3 -m pip install -r docs/requirements.txt
 sphinx-build docs build/html
 ```
 

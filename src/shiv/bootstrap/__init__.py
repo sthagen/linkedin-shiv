@@ -3,10 +3,13 @@ import os
 import runpy
 import shutil
 import site
+
+import hashlib
 import sys
+import subprocess
 import zipfile
 
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -33,11 +36,14 @@ def run(module):  # pragma: no cover
     sys.exit(module())
 
 
+@contextmanager
 def current_zipfile():
     """A function to vend the current zipfile, if any"""
     if zipfile.is_zipfile(sys.argv[0]):
-        fd = open(sys.argv[0], "rb")
-        return zipfile.ZipFile(fd)
+        with zipfile.ZipFile(sys.argv[0]) as fd:
+            yield fd
+    else:
+        yield None
 
 
 def import_string(import_name):
@@ -83,9 +89,17 @@ def cache_path(archive, root_dir, build_id):
     """Returns a ~/.shiv cache directory for unzipping site-packages during bootstrap.
 
     :param ZipFile archive: The zipfile object we are bootstrapping from.
-    :param Path root_dir: Optional, the path to a SHIV_ROOT.
+    :param str root_dir: Optional, either a path or environment variable pointing to a SHIV_ROOT.
     :param str build_id: The build id generated at zip creation.
     """
+
+    if root_dir:
+
+        if root_dir.startswith("$"):
+            root_dir = os.environ.get(root_dir[1:], root_dir[1:])
+
+        root_dir = Path(root_dir)
+
     root = root_dir or Path("~/.shiv").expanduser()
     name = Path(archive.filename).resolve().stem
     return root / f"{name}_{build_id}"
@@ -134,50 +148,90 @@ def extract_site_packages(archive, target_path, compile_pyc=False, compile_worke
             shutil.move(str(target_path_tmp), str(target_path))
 
 
-def _first_sitedir_index():
+def get_first_sitedir_index():
     for index, part in enumerate(sys.path):
         if Path(part).stem in ("site-packages", "dist-packages"):
             return index
 
 
-def _extend_python_path(environ, additional_paths):
+def extend_python_path(environ, additional_paths):
+    """Create or extend a PYTHONPATH variable with the frozen environment we are bootstrapping with."""
+
+    # we don't want to clobber any existing PYTHONPATH value, so check for it.
     python_path = environ["PYTHONPATH"].split(os.pathsep) if "PYTHONPATH" in environ else []
     python_path.extend(additional_paths)
-    environ["PYTHONPATH"] = os.pathsep.join(python_path)
+
+    # put it back into the environment so that PYTHONPATH contains the shiv-manipulated paths
+    # and any pre-existing PYTHONPATH values with no duplicates.
+    environ["PYTHONPATH"] = os.pathsep.join(sorted(set(python_path), key=python_path.index))
+
+
+def ensure_no_modify(site_packages, hashes):
+    """Compare the sha256 hash of the unpacked source files to the files when they were added to the pyz."""
+
+    for path in site_packages.rglob("**/*.py"):
+
+        if hashlib.sha256(path.read_bytes()).hexdigest() != hashes.get(str(path.relative_to(site_packages))):
+            raise RuntimeError(
+                "A Python source file has been modified! File: {}. "
+                "Try again with SHIV_FORCE_EXTRACT=1 to overwrite the modified source file(s).".format(str(path))
+            )
 
 
 def bootstrap():  # pragma: no cover
     """Actually bootstrap our shiv environment."""
 
     # get a handle of the currently executing zip file
-    archive = current_zipfile()
+    with current_zipfile() as archive:
 
-    # create an environment object (a combination of env vars and json metadata)
-    env = Environment.from_json(archive.read("environment.json").decode())
+        # create an environment object (a combination of env vars and json metadata)
+        env = Environment.from_json(archive.read("environment.json").decode())
 
-    # get a site-packages directory (from env var or via build id)
-    site_packages = cache_path(archive, env.root, env.build_id) / "site-packages"
+        # get a site-packages directory (from env var or via build id)
+        site_packages = cache_path(archive, env.root, env.build_id) / "site-packages"
 
-    # determine if first run or forcing extract
-    if not site_packages.exists() or env.force_extract:
-        extract_site_packages(archive, site_packages.parent, env.compile_pyc, env.compile_workers, env.force_extract)
+        # determine if first run or forcing extract
+        if not site_packages.exists() or env.force_extract:
+            extract_site_packages(
+                archive, site_packages.parent, env.compile_pyc, env.compile_workers, env.force_extract,
+            )
 
     # get sys.path's length
     length = len(sys.path)
 
     # Find the first instance of an existing site-packages on sys.path
-    index = _first_sitedir_index() or length
+    index = get_first_sitedir_index() or length
 
     # append site-packages using the stdlib blessed way of extending path
     # so as to handle .pth files correctly
     site.addsitedir(site_packages)
 
-    # add our site-packages to the environment, if requested
-    if env.extend_pythonpath:
-        _extend_python_path(os.environ, sys.path[index:])
-
     # reorder to place our site-packages before any others found
     sys.path = sys.path[:index] + sys.path[length:] + sys.path[index:length]
+
+    # check if source files have been modified, if required
+    if env.no_modify:
+        ensure_no_modify(site_packages, env.hashes)
+
+    # add our site-packages to the environment, if requested
+    if env.extend_pythonpath:
+        extend_python_path(os.environ, sys.path.copy())
+
+    # if a preamble script was provided, run it
+    if env.preamble:
+
+        # path to the preamble
+        preamble_bin = site_packages / "bin" / env.preamble
+
+        if preamble_bin.suffix == ".py":
+            runpy.run_path(
+                preamble_bin,
+                init_globals={"archive": sys.argv[0], "env": env, "site_packages": site_packages},
+                run_name="__main__",
+            )
+
+        else:
+            subprocess.run([preamble_bin])
 
     # first check if we should drop into interactive mode
     if not env.interpreter:
