@@ -33,6 +33,9 @@ def run(module):  # pragma: no cover
     with suppress(KeyError):
         del os.environ[Environment.ENTRY_POINT]
 
+    with suppress(KeyError):
+        del os.environ[Environment.CONSOLE_SCRIPT]
+
     sys.exit(module())
 
 
@@ -237,11 +240,11 @@ def bootstrap():  # pragma: no cover
     if not env.interpreter:
 
         # do entry point import and call
-        if env.entry_point is not None:
+        if env.entry_point is not None and not env.script:
             run(import_string(env.entry_point))
 
         elif env.script is not None:
-            run(partial(runpy.run_path, site_packages / "bin" / env.script, run_name="__main__"))
+            run(partial(runpy.run_path, str(site_packages / "bin" / env.script), run_name="__main__"))
 
     # all other options exhausted, drop into interactive mode
     execute_interpreter()

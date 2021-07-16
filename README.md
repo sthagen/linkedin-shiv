@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
 [![supported](https://img.shields.io/pypi/pyversions/shiv.svg)](https://pypi.python.org/pypi/shiv)
 
-![snake](https://github.com/linkedin/shiv/raw/master/logo.png)
+![snake](https://github.com/linkedin/shiv/raw/main/logo.png)
 
 # shiv
 shiv is a command line utility for building fully self-contained Python zipapps as outlined in [PEP 441](https://www.python.org/dev/peps/pep-0441/), but with all their dependencies included!
@@ -32,6 +32,8 @@ $ shiv -c flake8 -o ~/bin/flake8 flake8
 $ ~/bin/flake8 --version
 3.7.8 (mccabe: 0.6.1, pycodestyle: 2.5.0, pyflakes: 2.1.1) CPython 3.7.4 on Darwin
 ```
+
+`-c flake8` specifies the console script that should be invoked when the executable runs, `-o ~/bin/flake8` specifies the location of the generated executable file and `flake8` is the dependency that should be installed from PyPI.
 
 Creating an interactive executable with the boto library:
 
