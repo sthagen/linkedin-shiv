@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from click.testing import CliRunner
-from shiv.cli import get_interpreter_path, console_script_exists, find_entry_point, main
+from shiv.cli import console_script_exists, find_entry_point, main
 from shiv.constants import DISALLOWED_ARGS, DISALLOWED_PIP_ARGS, NO_OUTFILE, NO_PIP_ARGS_OR_SITE_PACKAGES
 from shiv.info import main as info_main
 from shiv.pip import install
@@ -86,21 +86,6 @@ class TestCLI:
         assert result.exit_code == 1
         assert NO_OUTFILE in result.output
 
-    def test_find_interpreter(self):
-
-        interpreter = get_interpreter_path()
-
-        assert Path(interpreter).exists()
-        assert Path(interpreter).is_file()
-
-    def test_find_interpreter_false(self):
-
-        with mocked_sys_prefix():
-            interpreter = get_interpreter_path()
-
-        # should fall back on the current sys.executable
-        assert interpreter == sys.executable
-
     @pytest.mark.parametrize("arg", [arg for tup in DISALLOWED_ARGS.keys() for arg in tup])
     def test_disallowed_args(self, runner, arg):
         """This method tests that all the potential disallowed arguments match their error messages."""
@@ -116,7 +101,7 @@ class TestCLI:
         # assert we got the correct reason
         assert DISALLOWED_PIP_ARGS.format(arg=arg, reason=reason) in result.output
 
-    @pytest.mark.parametrize("compile_option", [["--compile-pyc"], []])
+    @pytest.mark.parametrize("compile_option", [["--compile-pyc"], ["--build-id", "42424242"], []])
     @pytest.mark.parametrize("force", ["yes", "no"])
     def test_hello_world(self, runner, info_runner, shiv_root, package_location, compile_option, force):
         output_file = shiv_root / "test.pyz"
@@ -147,6 +132,8 @@ class TestCLI:
         # ensure that executable permissions were retained (skip test on windows)
         if os.name != "nt":
             build_id = json.loads(info_runner([str(output_file), "--json"]).output)["build_id"]
+            if "--build-id" in compile_option:
+                assert build_id == compile_option[1]
             assert (
                 Path(shiv_root, f"{output_file.stem}_{build_id}", "site-packages", "hello", "script.sh").stat().st_mode
                 & UGOX

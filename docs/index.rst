@@ -55,7 +55,7 @@ Let's break this command down,
 This creates an executable (``~/bin/flake8``) containing all the dependencies specified (``flake8``)
 that, when invoked, executes the provided console_script (``flake8``)!
 
-If you were to omit the entry point/console script flag, invoking the resulting executable wwould drop you into an interpreter that
+If you were to omit the entry point/console script flag, invoking the resulting executable would drop you into an interpreter that
 is bootstrapped with the dependencies you've specified. This can be useful for creating a single-artifact executable
 Python environment:
 
@@ -107,7 +107,7 @@ site-packages unless they are deleted or moved.
 
     Just as an example, shared objects loaded via the dlopen syscall require a regular filesystem.
     In addition, many libraries also expect a filesystem in order to do things like building paths via ``__file__`` (which doesn't work when a module is imported from a zip), etc.
-    To learn more, check out this resource about the setuptools `"zip_safe" flag <https://setuptools.readthedocs.io/en/latest/setuptools.html#setting-the-zip-safe-flag/>`_.
+    To learn more, check out this resource about the setuptools `"zip_safe" flag <https://setuptools.pypa.io/en/latest/userguide/miscellaneous.html#setting-the-zip-safe-flag>`_.
 
     **2.) Performance reasons**
 

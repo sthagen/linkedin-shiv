@@ -1,7 +1,6 @@
+import hashlib
 import os
 import shutil
-
-import hashlib
 import sys
 import time
 
@@ -17,6 +16,7 @@ from . import builder, pip
 from .bootstrap.environment import Environment
 from .constants import (
     BUILD_AT_TIMESTAMP_FORMAT,
+    DEFAULT_SHEBANG,
     DISALLOWED_ARGS,
     DISALLOWED_PIP_ARGS,
     NO_ENTRY_POINT,
@@ -26,7 +26,7 @@ from .constants import (
     SOURCE_DATE_EPOCH_ENV,
 )
 
-__version__ = "0.5.2"
+__version__ = "1.0.0"
 
 
 def find_entry_point(site_packages_dirs: List[Path], console_script: str) -> str:
@@ -66,39 +66,6 @@ def console_script_exists(site_packages_dirs: List[Path], console_script: str) -
     return False
 
 
-def get_interpreter_path(append_version: bool = False) -> str:
-    """A function to return the path to the current Python interpreter.
-
-    Even when inside a venv, this will return the interpreter the venv was created with.
-
-    """
-
-    base_dir = Path(getattr(sys, "real_prefix", sys.base_prefix)).resolve()
-    sys_exec = Path(sys.executable)
-    name = sys_exec.stem
-    suffix = sys_exec.suffix
-
-    if append_version:
-        name += str(sys.version_info.major)
-
-    name += suffix
-
-    try:
-        return str(next(iter(base_dir.rglob(name))))
-
-    except StopIteration:
-
-        if not append_version:
-            # If we couldn't find an interpreter, it's likely that we looked for
-            # "python" when we should've been looking for "python3"
-            # so we try again with append_version=True
-            return get_interpreter_path(append_version=True)
-
-        # If we were still unable to find a real interpreter for some reason
-        # we fallback to the current runtime's interpreter
-        return sys.executable
-
-
 def copytree(src: Path, dst: Path) -> None:
     """A utility function for syncing directories.
 
@@ -128,19 +95,39 @@ def copytree(src: Path, dst: Path) -> None:
 )
 @click.option("--console-script", "-c", default=None, help="The console_script to invoke.")
 @click.option("--output-file", "-o", help="The path to the output file for shiv to create.")
-@click.option("--python", "-p", help="The python interpreter to set as the shebang (such as '/usr/bin/env python3')")
+@click.option(
+    "--python",
+    "-p",
+    help=(
+        "The python interpreter to set as the shebang, a.k.a. whatever you want after '#!' "
+        "(default is '/usr/bin/env python3')"
+    ),
+)
 @click.option(
     "--site-packages",
     help="The path to an existing site-packages directory to copy into the zipapp.",
     type=click.Path(exists=True),
     multiple=True,
 )
+@click.option(
+    "--build-id",
+    default=None,
+    help=(
+        "Use a custom build id instead of the default (a SHA256 hash of the contents of the build). "
+        "Warning: must be unique per build!"
+    ),
+)
 @click.option("--compressed/--uncompressed", default=True, help="Whether or not to compress your zip.")
 @click.option(
-    "--compile-pyc", is_flag=True, help="Whether or not to compile pyc files during initial bootstrap.",
+    "--compile-pyc",
+    is_flag=True,
+    help="Whether or not to compile pyc files during initial bootstrap.",
 )
 @click.option(
-    "--extend-pythonpath", "-E", is_flag=True, help="Add the contents of the zipapp to PYTHONPATH (for subprocesses).",
+    "--extend-pythonpath",
+    "-E",
+    is_flag=True,
+    help="Add the contents of the zipapp to PYTHONPATH (for subprocesses).",
 )
 @click.option(
     "--reproducible",
@@ -176,6 +163,7 @@ def main(
     console_script: Optional[str],
     python: Optional[str],
     site_packages: Optional[str],
+    build_id: Optional[str],
     compressed: bool,
     compile_pyc: bool,
     extend_pythonpath: bool,
@@ -201,6 +189,13 @@ def main(
         for supplied_arg in pip_args:
             if supplied_arg in disallowed:
                 sys.exit(DISALLOWED_PIP_ARGS.format(arg=supplied_arg, reason=DISALLOWED_ARGS[disallowed]))
+
+    if build_id is not None:
+        click.secho(
+            "Warning! You have overridden the default build-id behavior, "
+            "executables created by shiv must have unique build IDs or unexpected behavior could occur.",
+            fg="yellow",
+        )
 
     sources: List[Path] = []
 
@@ -255,6 +250,7 @@ def main(
         # create runtime environment metadata
         env = Environment(
             built_at=datetime.utcfromtimestamp(timestamp).strftime(BUILD_AT_TIMESTAMP_FORMAT),
+            build_id=build_id,
             entry_point=entry_point,
             script=console_script,
             compile_pyc=compile_pyc,
@@ -273,7 +269,7 @@ def main(
         builder.create_archive(
             sources,
             target=Path(output_file).expanduser(),
-            interpreter=python or get_interpreter_path(),
+            interpreter=python or DEFAULT_SHEBANG,
             main="_bootstrap:bootstrap",
             env=env,
             compressed=compressed,
